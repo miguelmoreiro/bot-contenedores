@@ -1,4 +1,6 @@
 from flask import Flask, request, jsonify
+import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
@@ -26,6 +28,37 @@ def identificar_carrier(contenedor):
     prefijo_3 = contenedor[:3]
     return PREFIJOS_NAVIERAS.get(prefijo_4, PREFIJOS_NAVIERAS.get(prefijo_3, "OTRA / LEASING"))
 
+def scrapear_datos_naviera(contenedor, carrier):
+    """
+    Función de enrutamiento de scraping.
+    Ejecuta una lógica distinta de extracción HTML dependiendo de la naviera.
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    }
+    tipo = "SIN TIPO"
+    
+    try:
+        if carrier == "Hapag-Lloyd":
+            # Aquí programaremos la extracción exacta de los nodos HTML de Hapag-Lloyd
+            tipo = "PENDIENTE SCRAPING HAPAG"
+            
+        elif carrier == "MSC":
+            # Aquí programaremos la extracción exacta de MSC
+            tipo = "PENDIENTE SCRAPING MSC"
+            
+        elif carrier == "Maersk":
+            # Aquí programaremos la extracción exacta de Maersk
+            tipo = "PENDIENTE SCRAPING MAERSK"
+            
+        else:
+            tipo = "SCRAPING NO CONFIGURADO"
+            
+    except Exception as e:
+        tipo = f"ERROR: {str(e)}"
+        
+    return tipo
+
 @app.route('/consultar', methods=['POST'])
 def consultar():
     data = request.json
@@ -35,8 +68,8 @@ def consultar():
     
     carrier_detectado = identificar_carrier(contenedor)
     
-    # Regla temporal hasta aplicar el scraping real
-    tipo_contenedor = "40'HQ" if "7" in contenedor or "8" in contenedor else "20'DC"
+    # Llamamos a la función de scraping web en lugar de la regla temporal
+    tipo_contenedor = scrapear_datos_naviera(contenedor, carrier_detectado)
     
     resultado = {
         "container": contenedor,
