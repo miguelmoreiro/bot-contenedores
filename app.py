@@ -2,18 +2,18 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Base de datos integrada de prefijos navieros (estándar BIC)
 PREFIJOS_NAVIERAS = {
     "MED": "MSC", "MSCU": "MSC", "MSBU": "MSC", "MSGU": "MSC", "MSMU": "MSC", "MSNU": "MSC",
     "MAEU": "Maersk", "MSKU": "Maersk", "MRKU": "Maersk", "SEAU": "Maersk", "SUDU": "Hamburg Sud",
     "CMAU": "CMA CGM", "APLU": "CMA CGM", "CNCU": "CMA CGM", "CGMU": "CMA CGM",
-    "HLCU": "Hapag-Lloyd", "HLXU": "Hapag-Lloyd", "UACU": "Hapag-Lloyd",
+    "HLCU": "Hapag-Lloyd", "HLXU": "Hapag-Lloyd", "UACU": "Hapag-Lloyd", "HLBU": "Hapag-Lloyd",
     "ONEY": "ONE", "NYKU": "ONE", "MOLU": "ONE", "KKTU": "ONE",
     "EMCU": "Evergreen", "EISU": "Evergreen", "EGHU": "Evergreen", "EGLU": "Evergreen",
     "HMMU": "HMM", "HDMU": "HMM",
     "YMLU": "Yang Ming",
     "ZIMU": "ZIM", "ZCSU": "ZIM",
     "WHLU": "Wan Hai",
+    "HASU": "Heung-A Line", "HLHU": "Heung-A Line", "HALU": "Heung-A Line",
     "TRHU": "Triton International", "TGHU": "Textainer", "TEMU": "Textainer",
     "CLHU": "Textainer", "SEGU": "Seaco", "CAIU": "CAI International"
 }
@@ -34,13 +34,15 @@ def consultar():
         return jsonify({"error": "No container provided"}), 400
     
     carrier_detectado = identificar_carrier(contenedor)
+    
+    # Regla temporal hasta aplicar el scraping real
     tipo_contenedor = "40'HQ" if "7" in contenedor or "8" in contenedor else "20'DC"
     
     resultado = {
         "container": contenedor,
         "carrier": carrier_detectado,
         "type": tipo_contenedor,
-        "buque": "PENDIENTE ASIGNACIÓN",
+        "buque": "PENDIENTE",
         "eta": ""
     }
     return jsonify(resultado)
