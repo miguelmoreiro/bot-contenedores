@@ -17,7 +17,8 @@ PREFIJOS_NAVIERAS = {
     "WHLU": "Wan Hai",
     "HASU": "Heung-A Line", "HLHU": "Heung-A Line", "HALU": "Heung-A Line",
     "TRHU": "Triton International", "TGHU": "Textainer", "TEMU": "Textainer",
-    "CLHU": "Textainer", "SEGU": "Seaco", "CAIU": "CAI International"
+    "CLHU": "Textainer", "SEGU": "Seaco", "CAIU": "CAI International",
+    "TCLU": "Triton International"
 }
 
 def identificar_carrier(contenedor):
@@ -34,8 +35,6 @@ def extraer_maersk(contenedor, headers):
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            # Las webs modernas cargan el HTML vacío y luego inyectan los datos con JS.
-            # Buscamos patrones básicos en el DOM inicial.
             html_text = soup.text.upper()
             if "20" in html_text or "40" in html_text:
                 return "DOM INICIAL CARGADO"
@@ -69,7 +68,6 @@ def extraer_cma(contenedor, headers):
         return f"ERROR: {str(e)}"
 
 def scrapear_datos_naviera(contenedor, carrier):
-    # Simulamos ser un navegador real para evitar bloqueos inmediatos
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
     }
