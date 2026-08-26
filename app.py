@@ -28,52 +28,50 @@ def identificar_carrier(contenedor):
     prefijo_3 = contenedor[:3]
     return PREFIJOS_NAVIERAS.get(prefijo_4, PREFIJOS_NAVIERAS.get(prefijo_3, "OTRA / LEASING"))
 
-def realizar_scraping_navegador(url):
-    """
-    Abre un navegador invisible, carga la página esperando a que termine 
-    el JavaScript y devuelve el texto de la web.
-    """
+def scrapear_datos_naviera(contenedor, carrier):
+    carrier_upper = carrier.upper()
     resultado = "SIN DATOS"
+    
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            # Va a la URL y espera a que la red se quede quieta (JS cargado)
-            page.goto(url, wait_until="networkidle", timeout=15000)
             
-            # Extraemos todo el texto visible de la web
-            texto_web = page.evaluate("document.body.innerText").upper()
-            
-            # Lógica simple de detección para confirmar que superamos la barrera
-            if "20" in texto_web or "40" in texto_web or "DRY" in texto_web:
-                resultado = "NAVEGADOR OK: DATOS VISIBLES"
-            else:
-                resultado = "NAVEGADOR OK: PARSEO PENDIENTE"
+            # Lógica específica para TRITON
+            if "TRITON" in carrier_upper:
+                url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
+                page.goto(url, wait_until="networkidle", timeout=15000)
                 
-            browser.close()
+                # Le damos 4 segundos de ventaja a la página para que inyecte la tabla
+                page.wait_for_timeout(4000) 
+                
+                # Extraemos todo el texto y lo pasamos a mayúsculas
+                texto_web = page.evaluate("document.body.innerText").upper()
+                browser.close()
+                
+                # Buscamos las coincidencias exactas en el texto extraído
+                if "40' DRY VAN" in texto_web or "40' STANDARD" in texto_web:
+                    return "40'DC"
+                elif "20' DRY VAN" in texto_web or "20' STANDARD" in texto_web:
+                    return "20'DC"
+                elif "HIGH CUBE" in texto_web or "40' HC" in texto_web:
+                    return "40'HQ"
+                elif "OPEN TOP" in texto_web:
+                    return "OT"
+                elif "REEFER" in texto_web:
+                    return "REEFER"
+                else:
+                    return "TABLA CARGADA, TIPO NO RECONOCIDO"
+                    
+            # Aquí sumaremos Maersk, MSC, etc. en el siguiente paso
+            else:
+                browser.close()
+                return "SCRAPING PENDIENTE DE CONFIGURAR"
+                
     except Exception as e:
         resultado = f"ERROR NAVEGADOR: {str(e)}"
         
     return resultado
-
-def scrapear_datos_naviera(contenedor, carrier):
-    carrier_upper = carrier.upper()
-    url = ""
-    
-    if "MAERSK" in carrier_upper:
-        url = f"https://www.maersk.com/tracking/{contenedor}"
-    elif "MSC" in carrier_upper:
-        url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
-    elif "CMA" in carrier_upper:
-        url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
-    elif "HAPAG" in carrier_upper:
-        url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={contenedor}"
-    elif "TRITON" in carrier_upper:
-        url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
-    else:
-        return "SCRAPING NO CONFIGURADO"
-        
-    return realizar_scraping_navegador(url)
 
 @app.route('/consultar', methods=['POST'])
 def consultar():
