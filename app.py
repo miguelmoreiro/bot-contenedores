@@ -28,36 +28,60 @@ def identificar_carrier(contenedor):
     prefijo_3 = contenedor[:3]
     return PREFIJOS_NAVIERAS.get(prefijo_4, PREFIJOS_NAVIERAS.get(prefijo_3, "OTRA / LEASING"))
 
+def extraer_maersk(contenedor, headers):
+    try:
+        url = f"https://www.maersk.com/tracking/{contenedor}"
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # Las webs modernas cargan el HTML vacío y luego inyectan los datos con JS.
+            # Buscamos patrones básicos en el DOM inicial.
+            html_text = soup.text.upper()
+            if "20" in html_text or "40" in html_text:
+                return "DOM INICIAL CARGADO"
+            return "DATOS OCULTOS POR JS"
+        return f"BLOQUEO HTTP {response.status_code}"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+def extraer_msc(contenedor, headers):
+    try:
+        url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            html_text = soup.text.upper()
+            return "DATOS OCULTOS POR JS"
+        return f"BLOQUEO HTTP {response.status_code}"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+def extraer_cma(contenedor, headers):
+    try:
+        url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            html_text = soup.text.upper()
+            return "DATOS OCULTOS POR JS"
+        return f"BLOQUEO HTTP {response.status_code}"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
 def scrapear_datos_naviera(contenedor, carrier):
-    """
-    Función de enrutamiento de scraping.
-    Ejecuta una lógica distinta de extracción HTML dependiendo de la naviera.
-    """
+    # Simulamos ser un navegador real para evitar bloqueos inmediatos
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
     }
-    tipo = "SIN TIPO"
     
-    try:
-        if carrier == "Hapag-Lloyd":
-            # Aquí programaremos la extracción exacta de los nodos HTML de Hapag-Lloyd
-            tipo = "PENDIENTE SCRAPING HAPAG"
-            
-        elif carrier == "MSC":
-            # Aquí programaremos la extracción exacta de MSC
-            tipo = "PENDIENTE SCRAPING MSC"
-            
-        elif carrier == "Maersk":
-            # Aquí programaremos la extracción exacta de Maersk
-            tipo = "PENDIENTE SCRAPING MAERSK"
-            
-        else:
-            tipo = "SCRAPING NO CONFIGURADO"
-            
-    except Exception as e:
-        tipo = f"ERROR: {str(e)}"
-        
-    return tipo
+    if carrier == "Maersk":
+        return extraer_maersk(contenedor, headers)
+    elif carrier == "MSC":
+        return extraer_msc(contenedor, headers)
+    elif carrier == "CMA CGM":
+        return extraer_cma(contenedor, headers)
+    else:
+        return "SCRAPING NO CONFIGURADO"
 
 @app.route('/consultar', methods=['POST'])
 def consultar():
@@ -67,8 +91,6 @@ def consultar():
         return jsonify({"error": "No container provided"}), 400
     
     carrier_detectado = identificar_carrier(contenedor)
-    
-    # Llamamos a la función de scraping web en lugar de la regla temporal
     tipo_contenedor = scrapear_datos_naviera(contenedor, carrier_detectado)
     
     resultado = {
