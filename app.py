@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
-import requests
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
@@ -29,71 +28,72 @@ def identificar_carrier(contenedor):
     prefijo_3 = contenedor[:3]
     return PREFIJOS_NAVIERAS.get(prefijo_4, PREFIJOS_NAVIERAS.get(prefijo_3, "OTRA / LEASING"))
 
-def extraer_maersk(contenedor, headers):
+def realizar_scraping_navegador(url):
+    """
+    Abre un navegador invisible, carga la página esperando a que termine 
+    el JavaScript y devuelve el texto de la web.
+    """
+    resultado = "SIN DATOS"
     try:
-        url = f"https://www.maersk.com/tracking/{contenedor}"
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            html_text = soup.text.upper()
-            if "20" in html_text or "40" in html_text:
-                return "DOM INICIAL CARGADO"
-            return "DATOS OCULTOS POR JS"
-        return f"BLOQUEO HTTP {response.status_code}"
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            # Va a la URL y espera a que la red se quede quieta (JS cargado)
+            page.goto(url, wait_until="networkidle", timeout=15000)
+            
+            # Extraemos todo el texto visible de la web
+            texto_web = page.evaluate("document.body.innerText").upper()
+            
+            # Lógica simple de detección para confirmar que superamos la barrera
+            if "20" in texto_web or "40" in texto_web or "DRY" in texto_web:
+                resultado = "NAVEGADOR OK: DATOS VISIBLES"
+            else:
+                resultado = "NAVEGADOR OK: PARSEO PENDIENTE"
+                
+            browser.close()
     except Exception as e:
-        return f"ERROR: {str(e)}"
-
-def extraer_msc(contenedor, headers):
-    try:
-        url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            html_text = soup.text.upper()
-            return "DATOS OCULTOS POR JS"
-        return f"BLOQUEO HTTP {response.status_code}"
-    except Exception as e:
-        return f"ERROR: {str(e)}"
-
-def extraer_cma(contenedor, headers):
-    try:
-        url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            html_text = soup.text.upper()
-            return "DATOS OCULTOS POR JS"
-        return f"BLOQUEO HTTP {response.status_code}"
-    except Exception as e:
-        return f"ERROR: {str(e)}"
+        resultado = f"ERROR NAVEGADOR: {str(e)}"
+        
+    return resultado
 
 def scrapear_datos_naviera(contenedor, carrier):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-    }
+    carrier_upper = carrier.upper()
+    url = ""
     
-    if carrier == "Maersk":
-        return extraer_maersk(contenedor, headers)
-    elif carrier == "MSC":
-        return extraer_msc(contenedor, headers)
-    elif carrier == "CMA CGM":
-        return extraer_cma(contenedor, headers)
+    if "MAERSK" in carrier_upper:
+        url = f"https://www.maersk.com/tracking/{contenedor}"
+    elif "MSC" in carrier_upper:
+        url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
+    elif "CMA" in carrier_upper:
+        url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
+    elif "HAPAG" in carrier_upper:
+        url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={contenedor}"
+    elif "TRITON" in carrier_upper:
+        url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
     else:
         return "SCRAPING NO CONFIGURADO"
+        
+    return realizar_scraping_navegador(url)
 
 @app.route('/consultar', methods=['POST'])
 def consultar():
     data = request.json
     contenedor = data.get("container", "").upper().strip()
+    override_carrier = data.get("override_carrier", "").strip()
+    
     if not contenedor:
         return jsonify({"error": "No container provided"}), 400
     
-    carrier_detectado = identificar_carrier(contenedor)
-    tipo_contenedor = scrapear_datos_naviera(contenedor, carrier_detectado)
+    if override_carrier and override_carrier.upper() != "BUSCANDO...":
+        carrier_final = override_carrier
+    else:
+        carrier_final = identificar_carrier(contenedor)
+        
+    tipo_contenedor = scrapear_datos_naviera(contenedor, carrier_final)
     
     resultado = {
         "container": contenedor,
-        "carrier": carrier_detectado,
+        "carrier": carrier_final,
         "type": tipo_contenedor,
         "buque": "PENDIENTE",
         "eta": ""
