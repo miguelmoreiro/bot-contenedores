@@ -74,7 +74,6 @@ def scrapear_datos(contenedor, carrier_detectado):
         context = browser.new_context()
         page = context.new_page()
         
-        # Bloqueo de recursos pesados para evitar desbordes de RAM (OOM) en Render
         page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
         
         try:
@@ -83,19 +82,32 @@ def scrapear_datos(contenedor, carrier_detectado):
             
             if "TRITON" in carrier_upper:
                 url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                page.goto(url, wait_until="networkidle", timeout=25000)
                 
+                # Doble gatillo para forzar la búsqueda
                 page.evaluate('''
                     let buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
                     let searchBtn = buttons.find(b => (b.innerText || b.value || "").toLowerCase().includes("search"));
                     if (searchBtn) searchBtn.click();
                 ''')
-                page.wait_for_timeout(6000)
+                try:
+                    page.locator("input[type='text'], textarea, input").first.press("Enter", timeout=3000)
+                except:
+                    pass
+                
+                # Esperar a que aparezca una tabla en lugar de usar un timer ciego
+                try:
+                    page.wait_for_selector("table, .table, tbody tr", timeout=10000)
+                except:
+                    page.wait_for_timeout(6000)
                 
                 texto_web = page.content().upper()
                 for frame in page.frames:
                     try: texto_web += " " + frame.content().upper()
                     except: pass
+                
+                # Limpiar saltos de línea y espacios dobles
+                texto_web = re.sub(r'\s+', ' ', texto_web)
                 
                 if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
                 elif "MAERSK" in texto_web: carrier_final = "Maersk"
@@ -105,9 +117,8 @@ def scrapear_datos(contenedor, carrier_detectado):
 
             elif "TEXTAINER" in carrier_upper:
                 url = "https://tex.textainer.com/Equipment/StatusAndSpecificationsInquiry"
-                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                page.goto(url, wait_until="networkidle", timeout=25000)
                 
-                # Inyección JS robusta para lidiar con el formulario ASP.NET de Textainer
                 page.evaluate(f'''
                     let el = Array.from(document.querySelectorAll("textarea, input[type='text']")).find(e => e.offsetParent !== null);
                     if(el) el.value = "{contenedor}";
@@ -115,12 +126,17 @@ def scrapear_datos(contenedor, carrier_detectado):
                     if(btn) btn.click();
                 ''')
                 
-                page.wait_for_timeout(8000)
+                try:
+                    page.wait_for_selector("table, .table, tbody tr", timeout=10000)
+                except:
+                    page.wait_for_timeout(8000)
                 
                 texto_web = page.content().upper()
                 for frame in page.frames:
                     try: texto_web += " " + frame.content().upper()
                     except: pass
+                
+                texto_web = re.sub(r'\s+', ' ', texto_web)
                 
                 if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
                 elif "MAERSK" in texto_web: carrier_final = "Maersk"
@@ -186,7 +202,6 @@ def consultar():
     if carrier_detectado_original != "DESCONOCIDO":
         carrier_detectado_final, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado_original)
         
-        # Si la empresa de leasing determina que el contenedor está alquilado, se actualiza el link al del cliente final
         if carrier_detectado_original.upper() != carrier_detectado_final.upper() and override_carrier == "":
             nuevo_link = obtener_link_por_naviera(carrier_detectado_final)
             if nuevo_link:
