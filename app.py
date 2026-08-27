@@ -109,20 +109,33 @@ def scrapear_datos(contenedor, carrier_detectado):
             elif "TEXTAINER" in carrier_upper:
                 url = "https://tex.textainer.com/Equipment/StatusAndSpecificationsInquiry"
                 page.goto(url, wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(2000) # Dar tiempo a que cargue la interfaz inicial
                 
-                try:
-                    caja = page.locator("input[type='text']").first
-                    caja.fill(contenedor)
-                    caja.press("Enter")
-                except:
-                    pass
+                # Inyección JS robusta para lidiar con portales de reportes antiguos
+                page.evaluate(f'''
+                    let inputs = Array.from(document.querySelectorAll("input[type='text']"));
+                    let caja = inputs.find(i => i.offsetParent !== null); // Ignorar los ocultos
+                    if (caja) {{
+                        caja.value = "{contenedor}";
+                        caja.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        caja.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }}
+                    
+                    let btns = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
+                    let submitBtn = btns.find(b => {{
+                        let t = (b.innerText || b.value || "").toLowerCase();
+                        return t.includes("search") || t.includes("inquiry") || t.includes("view") || t.includes("find");
+                    }});
+                    if (submitBtn) submitBtn.click();
+                ''')
                 
-                page.wait_for_timeout(8000)
+                # Los reportes tipo SSRS tardan en procesar y recargar el iframe
+                page.wait_for_timeout(12000)
                 
                 texto_web = page.content().upper()
                 for frame in page.frames:
                     try:
-                        texto_web += " " + frame.content().upper()
+                        texto_web += " " + frame.locator("body").inner_text().upper()
                     except:
                         pass
                 
@@ -191,7 +204,7 @@ def consultar():
     if carrier_detectado_original != "OTRA / LEASING" and carrier_detectado_original != "DESCONOCIDO":
         carrier_detectado_final, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado_original)
         
-        # Si la empresa de leasing determinó que el contenedor lo tiene un cliente (MSC, Maersk, etc.), actualiza el link
+        # Si la empresa de leasing determinó que el contenedor lo tiene un cliente, actualiza el link
         if carrier_detectado_original.upper() != carrier_detectado_final.upper() and override_carrier == "":
             nuevo_link = obtener_link_por_naviera(carrier_detectado_final)
             if nuevo_link:
