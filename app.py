@@ -1,10 +1,18 @@
 import csv
 import os
 import re
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
+
+# --- NUEVA RUTA PARA VER LAS CAPTURAS DE PANTALLA ---
+@app.route('/debug/<filename>')
+def debug_image(filename):
+    path = os.path.join(os.getcwd(), filename)
+    if os.path.exists(path):
+        return send_file(path, mimetype='image/png')
+    return "Imagen no encontrada o ya borrada por el servidor.", 404
 
 def cargar_base_datos():
     base = {}
@@ -59,6 +67,7 @@ def normalizar_tipo(texto):
 def scrapear_datos(contenedor, carrier_detectado):
     carrier_final = carrier_detectado
     tipo_final = "SIN DATOS"
+    debug_link = ""
     
     browser_args = [
         '--no-sandbox',
@@ -71,7 +80,7 @@ def scrapear_datos(contenedor, carrier_detectado):
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=browser_args)
-        context = browser.new_context()
+        context = browser.new_context(viewport={'width': 1280, 'height': 800})
         page = context.new_page()
         
         page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
@@ -82,25 +91,32 @@ def scrapear_datos(contenedor, carrier_detectado):
             
             if "TRITON" in carrier_upper:
                 url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
-                page.goto(url, wait_until="networkidle", timeout=25000)
+                page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 
+                page.evaluate('''
+                    let buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
+                    let searchBtn = buttons.find(b => (b.innerText || b.value || "").toLowerCase().includes("search"));
+                    if (searchBtn) searchBtn.click();
+                ''')
                 try:
-                    page.locator("button", has_text=re.compile(r"search", re.IGNORECASE)).first.click(timeout=3000)
+                    page.locator("input[type='text'], textarea, input").first.press("Enter", timeout=3000)
                 except:
                     pass
                 
-                # Esperamos explícitamente a que el contenedor o la palabra "Showing" aparezca en el texto renderizado
-                try:
-                    page.wait_for_function(f"document.body.innerText.includes('{contenedor}') || document.body.innerText.includes('Showing')", timeout=15000)
-                except:
-                    page.wait_for_timeout(8000)
+                page.wait_for_timeout(8000) # Espera simple para no colapsar la RAM
                 
-                # Volvemos a innerText para evitar cortes por etiquetas HTML
-                texto_web = page.evaluate("document.body.innerText || ''").upper()
+                # TOMA LA FOTO Y GENERA EL LINK DE DEBUG
+                filename = f"debug_{contenedor}.png"
+                page.screenshot(path=filename, full_page=True)
+                debug_link = f"https://bot-contenedores-papw.onrender.com/debug/{filename}"
+                
+                raw_html = page.content()
                 for frame in page.frames:
-                    try: texto_web += " " + frame.evaluate("document.body.innerText || ''").upper()
+                    try: raw_html += " " + frame.content()
                     except: pass
                 
+                # Extraer texto de forma ultra ligera usando Python regex en vez del navegador
+                texto_web = re.sub(r'<[^>]+>', ' ', raw_html).upper()
                 texto_web = re.sub(r'\s+', ' ', texto_web)
                 
                 if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
@@ -111,7 +127,7 @@ def scrapear_datos(contenedor, carrier_detectado):
 
             elif "TEXTAINER" in carrier_upper:
                 url = "https://tex.textainer.com/Equipment/StatusAndSpecificationsInquiry"
-                page.goto(url, wait_until="networkidle", timeout=25000)
+                page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 
                 page.evaluate(f'''
                     let el = Array.from(document.querySelectorAll("textarea, input[type='text']")).find(e => e.offsetParent !== null);
@@ -120,16 +136,19 @@ def scrapear_datos(contenedor, carrier_detectado):
                     if(btn) btn.click();
                 ''')
                 
-                try:
-                    page.wait_for_function(f"document.body.innerText.includes('{contenedor}') || document.body.innerText.includes('Status')", timeout=15000)
-                except:
-                    page.wait_for_timeout(10000)
+                page.wait_for_timeout(8000)
                 
-                texto_web = page.evaluate("document.body.innerText || ''").upper()
+                # TOMA LA FOTO Y GENERA EL LINK DE DEBUG
+                filename = f"debug_{contenedor}.png"
+                page.screenshot(path=filename, full_page=True)
+                debug_link = f"https://bot-contenedores-papw.onrender.com/debug/{filename}"
+                
+                raw_html = page.content()
                 for frame in page.frames:
-                    try: texto_web += " " + frame.evaluate("document.body.innerText || ''").upper()
+                    try: raw_html += " " + frame.content()
                     except: pass
                 
+                texto_web = re.sub(r'<[^>]+>', ' ', raw_html).upper()
                 texto_web = re.sub(r'\s+', ' ', texto_web)
                 
                 if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
@@ -142,25 +161,25 @@ def scrapear_datos(contenedor, carrier_detectado):
                 url = f"https://www.maersk.com/tracking/{contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
-                texto_web = page.evaluate("document.body.innerText || ''").upper()
+                texto_web = re.sub(r'<[^>]+>', ' ', page.content()).upper()
                 
             elif "MSC" in carrier_upper:
                 url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
-                texto_web = page.evaluate("document.body.innerText || ''").upper()
+                texto_web = re.sub(r'<[^>]+>', ' ', page.content()).upper()
                 
             elif "CMA" in carrier_upper:
                 url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
-                texto_web = page.evaluate("document.body.innerText || ''").upper()
+                texto_web = re.sub(r'<[^>]+>', ' ', page.content()).upper()
                 
             elif "HAPAG" in carrier_upper:
                 url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
-                texto_web = page.evaluate("document.body.innerText || ''").upper()
+                texto_web = re.sub(r'<[^>]+>', ' ', page.content()).upper()
                 
             else:
                 tipo_final = "SCRAPING NO CONFIGURADO PARA ESTA NAVIERA"
@@ -178,7 +197,7 @@ def scrapear_datos(contenedor, carrier_detectado):
         finally:
             browser.close()
             
-    return carrier_final, tipo_final
+    return carrier_final, tipo_final, debug_link
 
 @app.route('/consultar', methods=['POST'])
 def consultar():
@@ -194,12 +213,17 @@ def consultar():
     carrier_detectado_original = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
     
     if carrier_detectado_original != "DESCONOCIDO":
-        carrier_detectado_final, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado_original)
+        carrier_detectado_final, tipo_contenedor, link_imagen = scrapear_datos(contenedor, carrier_detectado_original)
         
         if carrier_detectado_original.upper() != carrier_detectado_final.upper() and override_carrier == "":
             nuevo_link = obtener_link_por_naviera(carrier_detectado_final)
             if nuevo_link:
                 link_tracking = nuevo_link
+                
+        # Sobrescribimos temporalmente el link con la imagen de debug si existe
+        if link_imagen:
+            link_tracking = link_imagen
+            
     else:
         carrier_detectado_final = carrier_detectado_original
         tipo_contenedor = "NO SE PUDO DETERMINAR NAVIERA"
