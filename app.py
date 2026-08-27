@@ -78,30 +78,42 @@ def scrapear_triton(contenedor):
         page = browser.new_page()
         
         try:
-            url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
-            page.goto(url, wait_until="networkidle", timeout=25000)
+            # 1. Ir a la página base
+            url = "https://www.tritoncontainer.com/CustomerTools/UnitInquiry"
+            page.goto(url, wait_until="networkidle", timeout=30000)
             
-            # Acción principal: Buscar caja, borrar, escribir y presionar Enter
+            # 2. Localizar la caja exacta por su placeholder visual
             try:
+                caja = page.get_by_placeholder("Unit Number(s)")
+                if not caja.is_visible(timeout=3000):
+                    caja = page.locator("input[type='text'], textarea, input").first
+            except:
                 caja = page.locator("input[type='text'], textarea, input").first
-                caja.clear(timeout=3000)
-                caja.fill(contenedor)
-                caja.press("Enter", timeout=3000)
-            except:
-                pass
+                
+            caja.clear(timeout=3000)
+            caja.fill(contenedor)
             
-            # Contingencia: Buscar botón por palabras clave si el Enter no dispara la búsqueda
+            # 3. Hacer click en el botón de búsqueda usando regex universal
             try:
-                boton_regex = re.compile(r"search|buscar|seguimiento|track|rastrear", re.IGNORECASE)
-                page.locator("button", has_text=boton_regex).first.click(force=True, timeout=3000)
+                boton = page.locator("button", has_text=re.compile(r"search|buscar|seguimiento", re.IGNORECASE)).first
+                boton.click(force=True, timeout=3000)
             except:
-                pass
+                caja.press("Enter", timeout=3000)
             
-            page.wait_for_timeout(8000)
+            # 4. Esperar a que la red y el JS carguen la tabla
+            page.wait_for_timeout(10000)
             
-            texto_web = page.evaluate("document.body.innerText").upper()
+            # 5. Iterar sobre la página principal y TODOS los iframes incrustados para romper la seguridad
+            texto_web = ""
+            for frame in page.frames:
+                try:
+                    texto_web += " " + frame.locator("body").inner_text().upper()
+                except:
+                    pass
+            
             tipo_final = normalizar_tipo(texto_web)
             
+            # 6. Detección de la naviera arrendataria
             if "HAPAG" in texto_web:
                 carrier_final = "Hapag-Lloyd"
             elif "MAERSK" in texto_web:
