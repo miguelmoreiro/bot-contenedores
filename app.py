@@ -81,19 +81,17 @@ def scrapear_datos(contenedor, carrier_detectado):
         context = browser.new_context(viewport={'width': 1280, 'height': 800})
         page = context.new_page()
         
-        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
-        
         try:
             carrier_upper = carrier_detectado.upper()
             texto_web = ""
             
             if "TRITON" in carrier_upper:
-                # Usamos la home general de Triton Tools
                 url = "https://www.tritoncontainer.com/CustomerTools/UnitInquiry"
-                page.goto(url, wait_until="commit", timeout=25000)
+                page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 
-                # Esperamos un momento a que inyecte el DOM y rellenamos por JS puro
-                page.wait_for_timeout(3000)
+                # FOTO PASO 1: Al cargar la página principal
+                page.screenshot(path=os.path.join('/tmp', f'paso1_inicio_{contenedor}.png'))
+                
                 page.evaluate(f'''
                     let caja = document.querySelector("input, textarea");
                     if (caja) {{
@@ -102,7 +100,9 @@ def scrapear_datos(contenedor, carrier_detectado):
                     }}
                 ''')
                 
-                # Intentamos hacer clic en el botón de búsqueda
+                # FOTO PASO 2: Después de escribir el contenedor
+                page.screenshot(path=os.path.join('/tmp', f'paso2_escrito_{contenedor}.png'))
+                
                 try:
                     page.locator("button:has-text('Search'), input[value*='Search']").first.click(timeout=3000)
                 except:
@@ -110,11 +110,10 @@ def scrapear_datos(contenedor, carrier_detectado):
                 
                 page.wait_for_timeout(7000)
                 
-                # Guardar captura en /tmp de forma segura
-                filename = f"debug_{contenedor}.png"
-                filepath = os.path.join('/tmp', filename)
+                # FOTO PASO 3: Resultado final tras la búsqueda
+                filepath = os.path.join('/tmp', f'paso3_resultado_{contenedor}.png')
                 page.screenshot(path=filepath, full_page=True)
-                debug_link = f"https://bot-contenedores-papw.onrender.com/debug/{filename}"
+                debug_link = f"https://bot-contenedores-papw.onrender.com/debug/paso3_resultado_{contenedor}.png"
                 
                 raw_html = page.content()
                 for frame in page.frames:
@@ -134,6 +133,8 @@ def scrapear_datos(contenedor, carrier_detectado):
                 url = "https://tex.textainer.com/Equipment/StatusAndSpecificationsInquiry"
                 page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 
+                page.screenshot(path=os.path.join('/tmp', f'paso1_inicio_{contenedor}.png'))
+                
                 page.evaluate(f'''
                     let el = Array.from(document.querySelectorAll("textarea, input[type='text']")).find(e => e.offsetParent !== null);
                     if(el) el.value = "{contenedor}";
@@ -141,12 +142,12 @@ def scrapear_datos(contenedor, carrier_detectado):
                     if(btn) btn.click();
                 ''')
                 
+                page.screenshot(path=os.path.join('/tmp', f'paso2_escrito_{contenedor}.png'))
                 page.wait_for_timeout(8000)
                 
-                filename = f"debug_{contenedor}.png"
-                filepath = os.path.join('/tmp', filename)
+                filepath = os.path.join('/tmp', f'paso3_resultado_{contenedor}.png')
                 page.screenshot(path=filepath, full_page=True)
-                debug_link = f"https://bot-contenedores-papw.onrender.com/debug/{filename}"
+                debug_link = f"https://bot-contenedores-papw.onrender.com/debug/paso3_resultado_{contenedor}.png"
                 
                 raw_html = page.content()
                 for frame in page.frames:
@@ -161,44 +162,15 @@ def scrapear_datos(contenedor, carrier_detectado):
                 elif "MSC" in texto_web or "MED SHIPPING" in texto_web or "MEDITERRANEAN" in texto_web: carrier_final = "MSC"
                 elif "CMA" in texto_web: carrier_final = "CMA CGM"
                 elif re.search(r'\bONE\b', texto_web) or "OCEAN NETWORK EXPRESS" in texto_web: carrier_final = "ONE"
-                    
-            elif "MAERSK" in carrier_upper:
-                url = f"https://www.maersk.com/tracking/{contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                page.wait_for_timeout(5000)
-                texto_web = re.sub(r'<[^>]+>', ' ', page.content()).upper()
-                
-            elif "MSC" in carrier_upper:
-                url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                page.wait_for_timeout(5000)
-                texto_web = re.sub(r'<[^>]+>', ' ', page.content()).upper()
-                
-            elif "CMA" in carrier_upper:
-                url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                page.wait_for_timeout(5000)
-                texto_web = re.sub(r'<[^>]+>', ' ', page.content()).upper()
-                
-            elif "HAPAG" in carrier_upper:
-                url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                page.wait_for_timeout(5000)
-                texto_web = re.sub(r'<[^>]+>', ' ', page.content()).upper()
-                
             else:
-                tipo_final = "SCRAPING NO CONFIGURADO PARA ESTA NAVIERA"
+                tipo_final = "SCRAPING NO CONFIGURADO"
                 texto_web = ""
 
             if texto_web:
                 tipo_final = normalizar_tipo(texto_web)
                 
         except Exception as e:
-            error_str = str(e).lower()
-            if "timeout" in error_str:
-                tipo_final = "BLOQUEO ANTI-ROBOT O TIEMPO AGOTADO"
-            else:
-                tipo_final = f"ERROR: {str(e)[:40]}"
+            tipo_final = f"ERROR: {str(e)[:40]}"
         finally:
             browser.close()
             
