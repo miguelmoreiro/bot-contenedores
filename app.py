@@ -42,18 +42,18 @@ def identificar_carrier_y_link(contenedor):
     return "OTRA / LEASING", ""
 
 def normalizar_tipo(texto):
-    texto_upper = texto.upper()
-    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper or "40 DRY" in texto_upper or "40DC" in texto_upper:
-        return "40'DC"
-    if "20' DRY VAN" in texto_upper or "20' STANDARD" in texto_upper or "20'DV" in texto_upper or "20 DRY" in texto_upper or "20DC" in texto_upper:
-        return "20'DC"
-    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper or "40HQ" in texto_upper:
+    t = texto.upper()
+    if "40" in t and ("HC" in t or "HQ" in t or "HIGH" in t or "CUBE" in t):
         return "40'HQ"
-    if "OPEN TOP" in texto_upper or "40' OT" in texto_upper or "40 OPEN" in texto_upper:
+    if "40" in t and ("OT" in t or "OPEN" in t):
         return "40'OT"
-    if "REEFER" in texto_upper:
+    if "40" in t:
+        return "40'DC"
+    if "20" in t:
+        return "20'DC"
+    if "REEFER" in t or "RF" in t:
         return "REEFER"
-    return "TIPO NO IDENTIFICADO"
+    return "40'DC"  # Predeterminado si contiene datos generales de leasing
 
 def consultar_api_triton(contenedor, carrier_detectado):
     carrier_final = carrier_detectado
@@ -81,27 +81,14 @@ def consultar_api_triton(contenedor, carrier_detectado):
             resp_api = session.post(api_url, data=payload, headers=headers, timeout=10)
             
             if resp_api.status_code == 200:
-                try:
-                    data_json = resp_api.json()
-                    # Recorremos la estructura interna de la tabla de datos de Triton (DataTables)
-                    rows = data_json.get("data", [])
-                    if rows and isinstance(rows, list):
-                        for row in rows:
-                            fila_str = str(row).upper()
-                            if contenedor in fila_str:
-                                tipo_final = normalizar_tipo(fila_str)
-                                if "MSC" in fila_str or "MED SHIPPING" in fila_str:
-                                    carrier_final = "MSC"
-                                elif "ONE" in fila_str:
-                                    carrier_final = "ONE"
-                                break
-                    if tipo_final == "SIN DATOS":
-                        texto_respuesta = resp_api.text.upper()
-                        tipo_final = normalizar_tipo(texto_respuesta)
-                except:
-                    texto_respuesta = resp_api.text.upper()
+                texto_respuesta = resp_api.text.upper()
+                if contenedor in texto_respuesta:
                     tipo_final = normalizar_tipo(texto_respuesta)
-    except Exception as e:
+                    if "MSC" in texto_respuesta or "MED SHIPPING" in texto_respuesta:
+                        carrier_final = "MSC"
+                    elif "ONE" in texto_respuesta:
+                        carrier_final = "ONE"
+    except Exception:
         tipo_final = "ERROR API"
         
     return carrier_final, tipo_final
