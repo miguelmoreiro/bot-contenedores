@@ -78,32 +78,25 @@ def scrapear_triton(contenedor):
         page = browser.new_page()
         
         try:
-            # 1. Ir a la página base
-            url = "https://www.tritoncontainer.com/CustomerTools/UnitInquiry"
+            # Usamos el enlace directo con el contenedor ya inyectado en la URL
+            url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
             page.goto(url, wait_until="networkidle", timeout=30000)
             
-            # 2. Localizar la caja exacta por su placeholder visual
-            try:
-                caja = page.get_by_placeholder("Unit Number(s)")
-                if not caja.is_visible(timeout=3000):
-                    caja = page.locator("input[type='text'], textarea, input").first
-            except:
-                caja = page.locator("input[type='text'], textarea, input").first
-                
-            caja.clear(timeout=3000)
-            caja.fill(contenedor)
+            # Inyectamos JavaScript puro para hacer click en el botón Search por detrás
+            page.evaluate('''
+                let buttons = document.querySelectorAll("button");
+                for (let btn of buttons) {
+                    if (btn.innerText.trim().toLowerCase().includes("search")) {
+                        btn.click();
+                        break;
+                    }
+                }
+            ''')
             
-            # 3. Hacer click en el botón de búsqueda usando regex universal
-            try:
-                boton = page.locator("button", has_text=re.compile(r"search|buscar|seguimiento", re.IGNORECASE)).first
-                boton.click(force=True, timeout=3000)
-            except:
-                caja.press("Enter", timeout=3000)
+            # Esperamos que los datos se rendericen
+            page.wait_for_timeout(8000)
             
-            # 4. Esperar a que la red y el JS carguen la tabla
-            page.wait_for_timeout(10000)
-            
-            # 5. Iterar sobre la página principal y TODOS los iframes incrustados para romper la seguridad
+            # Extraemos el texto de la página y los iframes
             texto_web = ""
             for frame in page.frames:
                 try:
@@ -113,7 +106,6 @@ def scrapear_triton(contenedor):
             
             tipo_final = normalizar_tipo(texto_web)
             
-            # 6. Detección de la naviera arrendataria
             if "HAPAG" in texto_web:
                 carrier_final = "Hapag-Lloyd"
             elif "MAERSK" in texto_web:
