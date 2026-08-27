@@ -44,11 +44,12 @@ def identificar_carrier_y_link(contenedor):
 
 def normalizar_tipo(texto):
     texto_upper = texto.upper()
-    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper or "40 DRY" in texto_upper:
+    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper or "40 DRY STANDARD" in texto_upper:
         return "40'DC"
     if "20' DRY VAN" in texto_upper or "20' STANDARD" in texto_upper or "20'DV" in texto_upper or "20 DRY" in texto_upper:
         return "20'DC"
-    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper:
+    # Agregada la nomenclatura "40' DRY HIGH" específica de Maersk
+    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper or "40' DRY HIGH" in texto_upper:
         return "40'HQ"
     if "OPEN TOP" in texto_upper or "40' OT" in texto_upper or "40 OPEN" in texto_upper:
         return "40'OT"
@@ -77,79 +78,46 @@ def scrapear_datos(contenedor, carrier_detectado):
             carrier_upper = carrier_detectado.upper()
             texto_web = ""
             
-            if "TRITON" in carrier_upper:
-                url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
-                page.goto(url, wait_until="networkidle", timeout=30000)
+            # Si el carrier detectado en CSV es una empresa de leasing o es desconocido, usamos TraceContainer como puente
+            leasing_keywords = ["TRITON", "TEXTAINER", "SEACO", "CAI", "LEASING", "OTRA", "FLORENS", "BEACON", "SEACUBE"]
+            is_leasing = any(kw in carrier_upper for kw in leasing_keywords)
+            
+            if is_leasing:
+                url = "https://www.tracecontainer.com/"
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 
-                page.evaluate('''
-                    let buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
-                    let searchBtn = buttons.find(b => b.innerText.toLowerCase().includes("search") || b.value.toLowerCase().includes("search"));
-                    if (searchBtn) searchBtn.click();
-                ''')
-                page.wait_for_timeout(8000)
+                try:
+                    caja = page.locator("input[type='text']").first
+                    caja.fill(contenedor)
+                    page.locator("button", has_text=re.compile(r"track", re.IGNORECASE)).first.click(timeout=3000)
+                except:
+                    pass
+                
+                # Le damos 15 segundos para que procese y haga la redirección automática a Maersk/MSC/etc.
+                page.wait_for_timeout(15000)
                 
                 texto_web = page.content().upper()
+                current_url = page.url.upper()
+                
+                # Identificamos dónde terminamos tras la redirección para asignar la naviera real
+                if "MAERSK" in current_url or "MAERSK" in texto_web:
+                    carrier_final = "Maersk"
+                elif "MSC" in current_url or "MSC" in texto_web:
+                    carrier_final = "MSC"
+                elif "HAPAG" in current_url or "HAPAG" in texto_web:
+                    carrier_final = "Hapag-Lloyd"
+                elif "CMA" in current_url or "CMA" in texto_web:
+                    carrier_final = "CMA CGM"
+                elif "ONE" in current_url or "ONE-LINE" in current_url:
+                    carrier_final = "ONE"
+                
                 for frame in page.frames:
                     try:
                         texto_web += " " + frame.content().upper()
                     except:
                         pass
-                
-                if "HAPAG" in texto_web:
-                    carrier_final = "Hapag-Lloyd"
-                elif "MAERSK" in texto_web:
-                    carrier_final = "Maersk"
-                elif "MSC" in texto_web:
-                    carrier_final = "MSC"
-                elif "CMA" in texto_web:
-                    carrier_final = "CMA CGM"
-                elif "ONE" in texto_web:
-                    carrier_final = "ONE"
 
-            elif "TEXTAINER" in carrier_upper:
-                url = "https://tex.textainer.com/Equipment/StatusAndSpecificationsInquiry"
-                page.goto(url, wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(2000) # Dar tiempo a que cargue la interfaz inicial
-                
-                # Inyección JS robusta para lidiar con portales de reportes antiguos
-                page.evaluate(f'''
-                    let inputs = Array.from(document.querySelectorAll("input[type='text']"));
-                    let caja = inputs.find(i => i.offsetParent !== null); // Ignorar los ocultos
-                    if (caja) {{
-                        caja.value = "{contenedor}";
-                        caja.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        caja.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    }}
-                    
-                    let btns = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
-                    let submitBtn = btns.find(b => {{
-                        let t = (b.innerText || b.value || "").toLowerCase();
-                        return t.includes("search") || t.includes("inquiry") || t.includes("view") || t.includes("find");
-                    }});
-                    if (submitBtn) submitBtn.click();
-                ''')
-                
-                # Los reportes tipo SSRS tardan en procesar y recargar el iframe
-                page.wait_for_timeout(12000)
-                
-                texto_web = page.content().upper()
-                for frame in page.frames:
-                    try:
-                        texto_web += " " + frame.locator("body").inner_text().upper()
-                    except:
-                        pass
-                
-                if "HAPAG" in texto_web:
-                    carrier_final = "Hapag-Lloyd"
-                elif "MAERSK" in texto_web:
-                    carrier_final = "Maersk"
-                elif "MSC" in texto_web:
-                    carrier_final = "MSC"
-                elif "CMA" in texto_web:
-                    carrier_final = "CMA CGM"
-                elif "ONE" in texto_web:
-                    carrier_final = "ONE"
-                    
+            # Bloques directos para cuando ya sabemos la naviera con seguridad
             elif "MAERSK" in carrier_upper:
                 url = f"https://www.maersk.com/tracking/{contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -201,10 +169,11 @@ def consultar():
     
     carrier_detectado_original = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
     
-    if carrier_detectado_original != "OTRA / LEASING" and carrier_detectado_original != "DESCONOCIDO":
+    # Procesar scraping unificado
+    if carrier_detectado_original != "DESCONOCIDO":
         carrier_detectado_final, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado_original)
         
-        # Si la empresa de leasing determinó que el contenedor lo tiene un cliente, actualiza el link
+        # Si TraceContainer redireccionó y encontró el cliente final (ej: Maersk), actualiza el link
         if carrier_detectado_original.upper() != carrier_detectado_final.upper() and override_carrier == "":
             nuevo_link = obtener_link_por_naviera(carrier_detectado_final)
             if nuevo_link:
