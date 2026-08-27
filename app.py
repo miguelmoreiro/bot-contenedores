@@ -48,7 +48,6 @@ def normalizar_tipo(texto):
         return "40'DC"
     if "20' DRY VAN" in texto_upper or "20' STANDARD" in texto_upper or "20'DV" in texto_upper or "20 DRY" in texto_upper:
         return "20'DC"
-    # Agregada la nomenclatura "40' DRY HIGH" específica de Maersk
     if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper or "40' DRY HIGH" in texto_upper:
         return "40'HQ"
     if "OPEN TOP" in texto_upper or "40' OT" in texto_upper or "40 OPEN" in texto_upper:
@@ -72,13 +71,16 @@ def scrapear_datos(contenedor, carrier_detectado):
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=browser_args)
-        page = browser.new_page()
+        context = browser.new_context()
+        page = context.new_page()
+        
+        # Bloqueo estricto de recursos pesados para evitar Error 502 (Out of Memory)
+        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
         
         try:
             carrier_upper = carrier_detectado.upper()
             texto_web = ""
             
-            # Si el carrier detectado en CSV es una empresa de leasing o es desconocido, usamos TraceContainer como puente
             leasing_keywords = ["TRITON", "TEXTAINER", "SEACO", "CAI", "LEASING", "OTRA", "FLORENS", "BEACON", "SEACUBE"]
             is_leasing = any(kw in carrier_upper for kw in leasing_keywords)
             
@@ -93,13 +95,11 @@ def scrapear_datos(contenedor, carrier_detectado):
                 except:
                     pass
                 
-                # Le damos 15 segundos para que procese y haga la redirección automática a Maersk/MSC/etc.
                 page.wait_for_timeout(15000)
                 
                 texto_web = page.content().upper()
                 current_url = page.url.upper()
                 
-                # Identificamos dónde terminamos tras la redirección para asignar la naviera real
                 if "MAERSK" in current_url or "MAERSK" in texto_web:
                     carrier_final = "Maersk"
                 elif "MSC" in current_url or "MSC" in texto_web:
@@ -117,7 +117,6 @@ def scrapear_datos(contenedor, carrier_detectado):
                     except:
                         pass
 
-            # Bloques directos para cuando ya sabemos la naviera con seguridad
             elif "MAERSK" in carrier_upper:
                 url = f"https://www.maersk.com/tracking/{contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -169,11 +168,9 @@ def consultar():
     
     carrier_detectado_original = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
     
-    # Procesar scraping unificado
     if carrier_detectado_original != "DESCONOCIDO":
         carrier_detectado_final, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado_original)
         
-        # Si TraceContainer redireccionó y encontró el cliente final (ej: Maersk), actualiza el link
         if carrier_detectado_original.upper() != carrier_detectado_final.upper() and override_carrier == "":
             nuevo_link = obtener_link_por_naviera(carrier_detectado_final)
             if nuevo_link:
