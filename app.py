@@ -84,29 +84,23 @@ def scrapear_datos(contenedor, carrier_detectado):
                 url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
                 page.goto(url, wait_until="networkidle", timeout=25000)
                 
-                # Doble gatillo para forzar la búsqueda
-                page.evaluate('''
-                    let buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
-                    let searchBtn = buttons.find(b => (b.innerText || b.value || "").toLowerCase().includes("search"));
-                    if (searchBtn) searchBtn.click();
-                ''')
                 try:
-                    page.locator("input[type='text'], textarea, input").first.press("Enter", timeout=3000)
+                    page.locator("button", has_text=re.compile(r"search", re.IGNORECASE)).first.click(timeout=3000)
                 except:
                     pass
                 
-                # Esperar a que aparezca una tabla en lugar de usar un timer ciego
+                # Esperamos explícitamente a que el contenedor o la palabra "Showing" aparezca en el texto renderizado
                 try:
-                    page.wait_for_selector("table, .table, tbody tr", timeout=10000)
+                    page.wait_for_function(f"document.body.innerText.includes('{contenedor}') || document.body.innerText.includes('Showing')", timeout=15000)
                 except:
-                    page.wait_for_timeout(6000)
+                    page.wait_for_timeout(8000)
                 
-                texto_web = page.content().upper()
+                # Volvemos a innerText para evitar cortes por etiquetas HTML
+                texto_web = page.evaluate("document.body.innerText || ''").upper()
                 for frame in page.frames:
-                    try: texto_web += " " + frame.content().upper()
+                    try: texto_web += " " + frame.evaluate("document.body.innerText || ''").upper()
                     except: pass
                 
-                # Limpiar saltos de línea y espacios dobles
                 texto_web = re.sub(r'\s+', ' ', texto_web)
                 
                 if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
@@ -127,13 +121,13 @@ def scrapear_datos(contenedor, carrier_detectado):
                 ''')
                 
                 try:
-                    page.wait_for_selector("table, .table, tbody tr", timeout=10000)
+                    page.wait_for_function(f"document.body.innerText.includes('{contenedor}') || document.body.innerText.includes('Status')", timeout=15000)
                 except:
-                    page.wait_for_timeout(8000)
+                    page.wait_for_timeout(10000)
                 
-                texto_web = page.content().upper()
+                texto_web = page.evaluate("document.body.innerText || ''").upper()
                 for frame in page.frames:
-                    try: texto_web += " " + frame.content().upper()
+                    try: texto_web += " " + frame.evaluate("document.body.innerText || ''").upper()
                     except: pass
                 
                 texto_web = re.sub(r'\s+', ' ', texto_web)
@@ -148,25 +142,25 @@ def scrapear_datos(contenedor, carrier_detectado):
                 url = f"https://www.maersk.com/tracking/{contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
-                texto_web = page.content().upper()
+                texto_web = page.evaluate("document.body.innerText || ''").upper()
                 
             elif "MSC" in carrier_upper:
                 url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
-                texto_web = page.content().upper()
+                texto_web = page.evaluate("document.body.innerText || ''").upper()
                 
             elif "CMA" in carrier_upper:
                 url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
-                texto_web = page.content().upper()
+                texto_web = page.evaluate("document.body.innerText || ''").upper()
                 
             elif "HAPAG" in carrier_upper:
                 url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={contenedor}"
                 page.goto(url, wait_until="domcontentloaded", timeout=15000)
                 page.wait_for_timeout(5000)
-                texto_web = page.content().upper()
+                texto_web = page.evaluate("document.body.innerText || ''").upper()
                 
             else:
                 tipo_final = "SCRAPING NO CONFIGURADO PARA ESTA NAVIERA"
