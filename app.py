@@ -99,9 +99,9 @@ def scrapear_datos(contenedor, carrier_detectado):
                 
                 if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
                 elif "MAERSK" in texto_web: carrier_final = "Maersk"
-                elif "MSC" in texto_web: carrier_final = "MSC"
+                elif "MSC" in texto_web or "MED SHIPPING" in texto_web or "MEDITERRANEAN" in texto_web: carrier_final = "MSC"
                 elif "CMA" in texto_web: carrier_final = "CMA CGM"
-                elif "ONE" in texto_web: carrier_final = "ONE"
+                elif re.search(r'\bONE\b', texto_web) or "OCEAN NETWORK EXPRESS" in texto_web: carrier_final = "ONE"
 
             elif "TEXTAINER" in carrier_upper:
                 url = "https://tex.textainer.com/Equipment/StatusAndSpecificationsInquiry"
@@ -124,9 +124,9 @@ def scrapear_datos(contenedor, carrier_detectado):
                 
                 if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
                 elif "MAERSK" in texto_web: carrier_final = "Maersk"
-                elif "MSC" in texto_web: carrier_final = "MSC"
+                elif "MSC" in texto_web or "MED SHIPPING" in texto_web or "MEDITERRANEAN" in texto_web: carrier_final = "MSC"
                 elif "CMA" in texto_web: carrier_final = "CMA CGM"
-                elif "ONE" in texto_web: carrier_final = "ONE"
+                elif re.search(r'\bONE\b', texto_web) or "OCEAN NETWORK EXPRESS" in texto_web: carrier_final = "ONE"
                     
             elif "MAERSK" in carrier_upper:
                 url = f"https://www.maersk.com/tracking/{contenedor}"
