@@ -61,7 +61,6 @@ def consultar_web_ligera(contenedor, carrier_detectado):
     
     try:
         if "TRITON" in carrier_detectado.upper():
-            # Petición HTTP directa al endpoint de Triton
             url = f"https://tools.tritoncontainer.com/tritoncontainer/unitStatus/list"
             headers = {"User-Agent": "Mozilla/5.0"}
             response = requests.get(url, headers=headers, timeout=10)
@@ -91,7 +90,7 @@ def consultar():
         return jsonify({"error": "No container provided"}), 400
     
     naviera_bd, link_tracking = identificar_carrier_y_link(contenedor)
-    carrier_detectado_original = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else nav_data = naviera_bd
+    carrier_detectado_original = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
     
     carrier_final, tipo_contenedor = consultar_web_ligera(contenedor, carrier_detectado_original)
     
