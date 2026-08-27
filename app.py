@@ -11,7 +11,7 @@ def debug_image(filename):
     path = os.path.join('/tmp', filename)
     if os.path.exists(path):
         return send_file(path, mimetype='image/png')
-    return "Imagen no encontrada o ya borrada por el servidor.", 404
+    return "Imagen no encontrada.", 404
 
 def cargar_base_datos():
     base = {}
@@ -20,7 +20,6 @@ def cargar_base_datos():
             reader = csv.DictReader(f, delimiter=';')
             for row in reader:
                 row_clean = {str(k).strip(): str(v).strip() for k, v in row.items() if k is not None}
-                
                 prefijo = row_clean.get('Container Prefix', '').upper()
                 if prefijo:
                     base[prefijo] = {
@@ -89,25 +88,29 @@ def scrapear_datos(contenedor, carrier_detectado):
             texto_web = ""
             
             if "TRITON" in carrier_upper:
-                # Entramos a la página principal de herramientas de Triton
+                # Usamos la home general de Triton Tools
                 url = "https://www.tritoncontainer.com/CustomerTools/UnitInquiry"
-                page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                page.goto(url, wait_until="commit", timeout=25000)
                 
-                # Inyección JS para rellenar la caja de texto y hacer clic en Search
+                # Esperamos un momento a que inyecte el DOM y rellenamos por JS puro
+                page.wait_for_timeout(3000)
                 page.evaluate(f'''
-                    let caja = document.querySelector("textarea, input[type='text']");
+                    let caja = document.querySelector("input, textarea");
                     if (caja) {{
                         caja.value = "{contenedor}";
                         caja.dispatchEvent(new Event('input', {{ bubbles: true }}));
                     }}
-                    let buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
-                    let searchBtn = buttons.find(b => (b.innerText || b.value || "").toLowerCase().includes("search"));
-                    if (searchBtn) searchBtn.click();
                 ''')
                 
-                page.wait_for_timeout(8000)
+                # Intentamos hacer clic en el botón de búsqueda
+                try:
+                    page.locator("button:has-text('Search'), input[value*='Search']").first.click(timeout=3000)
+                except:
+                    page.keyboard.press("Enter")
                 
-                # Guardar captura en /tmp (única ruta con permisos de escritura en Render)
+                page.wait_for_timeout(7000)
+                
+                # Guardar captura en /tmp de forma segura
                 filename = f"debug_{contenedor}.png"
                 filepath = os.path.join('/tmp', filename)
                 page.screenshot(path=filepath, full_page=True)
@@ -211,7 +214,6 @@ def consultar():
         return jsonify({"error": "No container provided"}), 400
     
     naviera_bd, link_tracking = identificar_carrier_y_link(contenedor)
-    
     carrier_detectado_original = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
     
     if carrier_detectado_original != "DESCONOCIDO":
@@ -224,7 +226,6 @@ def consultar():
                 
         if link_imagen:
             link_tracking = link_imagen
-            
     else:
         carrier_detectado_final = carrier_detectado_original
         tipo_contenedor = "NO SE PUDO DETERMINAR NAVIERA"
