@@ -10,13 +10,17 @@ def cargar_base_datos():
     if os.path.exists('navieras.csv'):
         # utf-8-sig evita problemas con caracteres especiales y BOM de Excel
         with open('navieras.csv', mode='r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
+            # Fijamos el delimitador explícitamente en punto y coma
+            reader = csv.DictReader(f, delimiter=';')
             for row in reader:
-                prefijo = row.get('Container Prefix', '').strip().upper()
+                # Limpiar espacios invisibles en las claves y valores
+                row_clean = {str(k).strip(): str(v).strip() for k, v in row.items() if k is not None}
+                
+                prefijo = row_clean.get('Container Prefix', '').upper()
                 if prefijo:
                     base[prefijo] = {
-                        "naviera": row.get('Shipping Line', '').strip(),
-                        "link": row.get('Tracking URL', '').strip()
+                        "naviera": row_clean.get('Shipping Line', ''),
+                        "link": row_clean.get('Tracking URL', '')
                     }
     return base
 
