@@ -1,5 +1,6 @@
 import csv
 import os
+import re
 from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
 
@@ -78,12 +79,21 @@ def scrapear_triton(contenedor):
         
         try:
             url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
-            # networkidle asegura que espere a que termine de procesar JS inicial
             page.goto(url, wait_until="networkidle", timeout=25000)
             
-            # Fuerza el clic en el botón Search porque la página no busca automáticamente
+            # Acción principal: Buscar caja, borrar, escribir y presionar Enter
             try:
-                page.locator("text=Search").first.click(timeout=5000)
+                caja = page.locator("input[type='text'], textarea, input").first
+                caja.clear(timeout=3000)
+                caja.fill(contenedor)
+                caja.press("Enter", timeout=3000)
+            except:
+                pass
+            
+            # Contingencia: Buscar botón por palabras clave si el Enter no dispara la búsqueda
+            try:
+                boton_regex = re.compile(r"search|buscar|seguimiento|track|rastrear", re.IGNORECASE)
+                page.locator("button", has_text=boton_regex).first.click(force=True, timeout=3000)
             except:
                 pass
             
@@ -119,7 +129,6 @@ def consultar():
     if not contenedor:
         return jsonify({"error": "No container provided"}), 400
     
-    # Extraemos naviera y link del archivo CSV
     naviera_bd, link_tracking = identificar_carrier_y_link(contenedor)
     
     carrier_detectado = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
@@ -128,7 +137,6 @@ def consultar():
     if "TRITON" in carrier_detectado.upper():
         carrier_detectado, tipo_contenedor = scrapear_triton(contenedor)
         
-        # Si Triton confirmó que está alquilado a otra naviera, buscamos su link correcto
         if carrier_detectado != "Triton International":
             nuevo_link = obtener_link_por_naviera(carrier_detectado)
             if nuevo_link:
