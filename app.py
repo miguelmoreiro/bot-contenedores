@@ -88,7 +88,37 @@ def scrapear_datos(contenedor, carrier_detectado):
                 ''')
                 page.wait_for_timeout(8000)
                 
-                # Extraer HTML crudo en lugar de inner_text para evadir bloqueos de visibilidad CSS
+                texto_web = page.content().upper()
+                for frame in page.frames:
+                    try:
+                        texto_web += " " + frame.content().upper()
+                    except:
+                        pass
+                
+                if "HAPAG" in texto_web:
+                    carrier_final = "Hapag-Lloyd"
+                elif "MAERSK" in texto_web:
+                    carrier_final = "Maersk"
+                elif "MSC" in texto_web:
+                    carrier_final = "MSC"
+                elif "CMA" in texto_web:
+                    carrier_final = "CMA CGM"
+                elif "ONE" in texto_web:
+                    carrier_final = "ONE"
+
+            elif "TEXTAINER" in carrier_upper:
+                url = "https://tex.textainer.com/Equipment/StatusAndSpecificationsInquiry"
+                page.goto(url, wait_until="networkidle", timeout=30000)
+                
+                try:
+                    caja = page.locator("input[type='text']").first
+                    caja.fill(contenedor)
+                    caja.press("Enter")
+                except:
+                    pass
+                
+                page.wait_for_timeout(8000)
+                
                 texto_web = page.content().upper()
                 for frame in page.frames:
                     try:
@@ -156,23 +186,23 @@ def consultar():
     
     naviera_bd, link_tracking = identificar_carrier_y_link(contenedor)
     
-    carrier_detectado = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
+    carrier_detectado_original = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
     
-    # Procesar scraping unificado
-    if carrier_detectado != "OTRA / LEASING" and carrier_detectado != "DESCONOCIDO":
-        carrier_detectado, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado)
+    if carrier_detectado_original != "OTRA / LEASING" and carrier_detectado_original != "DESCONOCIDO":
+        carrier_detectado_final, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado_original)
         
-        # Corrección de link si Triton detectó que pertenece a otra naviera
-        if "TRITON" not in carrier_detectado.upper() and override_carrier == "":
-            nuevo_link = obtener_link_por_naviera(carrier_detectado)
+        # Si la empresa de leasing determinó que el contenedor lo tiene un cliente (MSC, Maersk, etc.), actualiza el link
+        if carrier_detectado_original.upper() != carrier_detectado_final.upper() and override_carrier == "":
+            nuevo_link = obtener_link_por_naviera(carrier_detectado_final)
             if nuevo_link:
                 link_tracking = nuevo_link
     else:
+        carrier_detectado_final = carrier_detectado_original
         tipo_contenedor = "NO SE PUDO DETERMINAR NAVIERA"
     
     resultado = {
         "container": contenedor,
-        "carrier": carrier_detectado,
+        "carrier": carrier_detectado_final,
         "type": tipo_contenedor,
         "buque": "PENDIENTE",
         "eta": "",
