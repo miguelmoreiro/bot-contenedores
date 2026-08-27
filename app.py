@@ -10,7 +10,6 @@ def cargar_base_datos():
     if os.path.exists('navieras.csv'):
         # utf-8-sig evita problemas con caracteres especiales y BOM de Excel
         with open('navieras.csv', mode='r', encoding='utf-8-sig') as f:
-            # Fijamos el delimitador explícitamente en punto y coma
             reader = csv.DictReader(f, delimiter=';')
             for row in reader:
                 # Limpiar espacios invisibles en las claves y valores
@@ -26,6 +25,13 @@ def cargar_base_datos():
 
 # Carga la base de datos en memoria al iniciar el servidor
 BASE_DATOS = cargar_base_datos()
+
+def obtener_link_por_naviera(nombre_naviera):
+    # Busca el link de la naviera en el diccionario para sobreescribir el de Triton
+    for datos in BASE_DATOS.values():
+        if datos["naviera"].upper() == nombre_naviera.upper():
+            return datos["link"]
+    return ""
 
 def identificar_carrier_y_link(contenedor):
     contenedor = contenedor.upper().strip()
@@ -72,7 +78,14 @@ def scrapear_triton(contenedor):
         
         try:
             url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
-            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            # networkidle asegura que espere a que termine de procesar JS inicial
+            page.goto(url, wait_until="networkidle", timeout=25000)
+            
+            # Fuerza el clic en el botón Search porque la página no busca automáticamente
+            try:
+                page.locator("text=Search").first.click(timeout=5000)
+            except:
+                pass
             
             page.wait_for_timeout(8000)
             
@@ -114,6 +127,12 @@ def consultar():
     
     if "TRITON" in carrier_detectado.upper():
         carrier_detectado, tipo_contenedor = scrapear_triton(contenedor)
+        
+        # Si Triton confirmó que está alquilado a otra naviera, buscamos su link correcto
+        if carrier_detectado != "Triton International":
+            nuevo_link = obtener_link_por_naviera(carrier_detectado)
+            if nuevo_link:
+                link_tracking = nuevo_link
     else:
         tipo_contenedor = "SCRAPING NAVIERA PENDIENTE"
     
