@@ -1,32 +1,39 @@
+import csv
+import os
 from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-PREFIJOS_NAVIERAS = {
-    "MED": "MSC", "MSCU": "MSC", "MSBU": "MSC", "MSGU": "MSC", "MSNU": "MSC", "MSMU": "MSC",
-    "MAEU": "Maersk", "MSKU": "Maersk", "MRKU": "Maersk", "SEAU": "Maersk", "SUDU": "Hamburg Sud",
-    "CMAU": "CMA CGM", "APLU": "CMA CGM", "CNCU": "CMA CGM", "CGMU": "CMA CGM",
-    "HLCU": "Hapag-Lloyd", "HLXU": "Hapag-Lloyd", "UACU": "Hapag-Lloyd", "HLBU": "Hapag-Lloyd",
-    "ONEY": "ONE", "NYKU": "ONE", "MOLU": "ONE", "KKTU": "ONE",
-    "EMCU": "Evergreen", "EISU": "Evergreen", "EGHU": "Evergreen", "EGLU": "Evergreen",
-    "HMMU": "HMM", "HDMU": "HMM",
-    "YMLU": "Yang Ming",
-    "ZIMU": "ZIM", "ZCSU": "ZIM",
-    "WHLU": "Wan Hai",
-    "HASU": "Heung-A Line", "HLHU": "Heung-A Line", "HALU": "Heung-A Line",
-    "TRHU": "Triton International", "TGHU": "Textainer", "TEMU": "Textainer",
-    "CLHU": "Textainer", "SEGU": "Seaco", "CAIU": "CAI International",
-    "TCLU": "Triton International"
-}
+def cargar_base_datos():
+    base = {}
+    if os.path.exists('navieras.csv'):
+        # utf-8-sig evita problemas con caracteres especiales y BOM de Excel
+        with open('navieras.csv', mode='r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                prefijo = row.get('Container Prefix', '').strip().upper()
+                if prefijo:
+                    base[prefijo] = {
+                        "naviera": row.get('Shipping Line', '').strip(),
+                        "link": row.get('Tracking URL', '').strip()
+                    }
+    return base
 
-def identificar_carrier(contenedor):
+# Carga la base de datos en memoria al iniciar el servidor
+BASE_DATOS = cargar_base_datos()
+
+def identificar_carrier_y_link(contenedor):
     contenedor = contenedor.upper().strip()
     if len(contenedor) < 4:
-        return "DESCONOCIDO"
+        return "DESCONOCIDO", ""
     prefijo_4 = contenedor[:4]
     prefijo_3 = contenedor[:3]
-    return PREFIJOS_NAVIERAS.get(prefijo_4, PREFIJOS_NAVIERAS.get(prefijo_3, "OTRA / LEASING"))
+    
+    datos = BASE_DATOS.get(prefijo_4) or BASE_DATOS.get(prefijo_3)
+    if datos:
+        return datos["naviera"], datos["link"]
+    return "OTRA / LEASING", ""
 
 def normalizar_tipo(texto):
     texto_upper = texto.upper()
@@ -46,7 +53,6 @@ def scrapear_triton(contenedor):
     carrier_final = "Triton International"
     tipo_final = "SIN DATOS"
     
-    # Banderas para reducir el uso de memoria RAM en servidores en la nube
     browser_args = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -64,14 +70,11 @@ def scrapear_triton(contenedor):
             url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
             page.goto(url, wait_until="domcontentloaded", timeout=25000)
             
-            # Espera a que la tabla de resultados esté presente
-            page.wait_for_selector("table", timeout=10000)
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(8000)
             
             texto_web = page.evaluate("document.body.innerText").upper()
             tipo_final = normalizar_tipo(texto_web)
             
-            # Detección automática de la naviera arrendataria (Customer)
             if "HAPAG" in texto_web:
                 carrier_final = "Hapag-Lloyd"
             elif "MAERSK" in texto_web:
@@ -99,7 +102,10 @@ def consultar():
     if not contenedor:
         return jsonify({"error": "No container provided"}), 400
     
-    carrier_detectado = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else identificar_carrier(contenedor)
+    # Extraemos naviera y link del archivo CSV
+    naviera_bd, link_tracking = identificar_carrier_y_link(contenedor)
+    
+    carrier_detectado = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
     tipo_contenedor = "PENDIENTE"
     
     if "TRITON" in carrier_detectado.upper():
@@ -112,7 +118,8 @@ def consultar():
         "carrier": carrier_detectado,
         "type": tipo_contenedor,
         "buque": "PENDIENTE",
-        "eta": ""
+        "eta": "",
+        "tracking_link": link_tracking
     }
     return jsonify(resultado)
 
