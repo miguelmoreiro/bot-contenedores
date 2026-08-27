@@ -9,11 +9,9 @@ app = Flask(__name__)
 def cargar_base_datos():
     base = {}
     if os.path.exists('navieras.csv'):
-        # utf-8-sig evita problemas con caracteres especiales y BOM de Excel
         with open('navieras.csv', mode='r', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f, delimiter=';')
             for row in reader:
-                # Limpiar espacios invisibles en las claves y valores
                 row_clean = {str(k).strip(): str(v).strip() for k, v in row.items() if k is not None}
                 
                 prefijo = row_clean.get('Container Prefix', '').upper()
@@ -24,11 +22,9 @@ def cargar_base_datos():
                     }
     return base
 
-# Carga la base de datos en memoria al iniciar el servidor
 BASE_DATOS = cargar_base_datos()
 
 def obtener_link_por_naviera(nombre_naviera):
-    # Busca el link de la naviera en el diccionario para sobreescribir el de Triton
     for datos in BASE_DATOS.values():
         if datos["naviera"].upper() == nombre_naviera.upper():
             return datos["link"]
@@ -48,20 +44,20 @@ def identificar_carrier_y_link(contenedor):
 
 def normalizar_tipo(texto):
     texto_upper = texto.upper()
-    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper:
+    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper or "40 DRY" in texto_upper:
         return "40'DC"
-    if "20' DRY VAN" in texto_upper or "20' STANDARD" in texto_upper or "20'DV" in texto_upper:
+    if "20' DRY VAN" in texto_upper or "20' STANDARD" in texto_upper or "20'DV" in texto_upper or "20 DRY" in texto_upper:
         return "20'DC"
-    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper:
+    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper:
         return "40'HQ"
-    if "OPEN TOP" in texto_upper or "40' OT" in texto_upper:
+    if "OPEN TOP" in texto_upper or "40' OT" in texto_upper or "40 OPEN" in texto_upper:
         return "40'OT"
     if "REEFER" in texto_upper:
         return "REEFER"
     return "TIPO NO IDENTIFICADO"
 
-def scrapear_triton(contenedor):
-    carrier_final = "Triton International"
+def scrapear_datos(contenedor, carrier_detectado):
+    carrier_final = carrier_detectado
     tipo_final = "SIN DATOS"
     
     browser_args = [
@@ -78,44 +74,69 @@ def scrapear_triton(contenedor):
         page = browser.new_page()
         
         try:
-            # Usamos el enlace directo con el contenedor ya inyectado en la URL
-            url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
-            page.goto(url, wait_until="networkidle", timeout=30000)
-            
-            # Inyectamos JavaScript puro para hacer click en el botón Search por detrás
-            page.evaluate('''
-                let buttons = document.querySelectorAll("button");
-                for (let btn of buttons) {
-                    if (btn.innerText.trim().toLowerCase().includes("search")) {
-                        btn.click();
-                        break;
-                    }
-                }
-            ''')
-            
-            # Esperamos que los datos se rendericen
-            page.wait_for_timeout(8000)
-            
-            # Extraemos el texto de la página y los iframes
+            carrier_upper = carrier_detectado.upper()
             texto_web = ""
-            for frame in page.frames:
-                try:
-                    texto_web += " " + frame.locator("body").inner_text().upper()
-                except:
-                    pass
             
-            tipo_final = normalizar_tipo(texto_web)
-            
-            if "HAPAG" in texto_web:
-                carrier_final = "Hapag-Lloyd"
-            elif "MAERSK" in texto_web:
-                carrier_final = "Maersk"
-            elif "MSC" in texto_web:
-                carrier_final = "MSC"
-            elif "CMA" in texto_web:
-                carrier_final = "CMA CGM"
-            elif "ONE" in texto_web:
-                carrier_final = "ONE"
+            if "TRITON" in carrier_upper:
+                url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
+                page.goto(url, wait_until="networkidle", timeout=30000)
+                
+                page.evaluate('''
+                    let buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
+                    let searchBtn = buttons.find(b => b.innerText.toLowerCase().includes("search") || b.value.toLowerCase().includes("search"));
+                    if (searchBtn) searchBtn.click();
+                ''')
+                page.wait_for_timeout(8000)
+                
+                # Extraer HTML crudo en lugar de inner_text para evadir bloqueos de visibilidad CSS
+                texto_web = page.content().upper()
+                for frame in page.frames:
+                    try:
+                        texto_web += " " + frame.content().upper()
+                    except:
+                        pass
+                
+                if "HAPAG" in texto_web:
+                    carrier_final = "Hapag-Lloyd"
+                elif "MAERSK" in texto_web:
+                    carrier_final = "Maersk"
+                elif "MSC" in texto_web:
+                    carrier_final = "MSC"
+                elif "CMA" in texto_web:
+                    carrier_final = "CMA CGM"
+                elif "ONE" in texto_web:
+                    carrier_final = "ONE"
+                    
+            elif "MAERSK" in carrier_upper:
+                url = f"https://www.maersk.com/tracking/{contenedor}"
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(8000)
+                texto_web = page.content().upper()
+                
+            elif "MSC" in carrier_upper:
+                url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(8000)
+                texto_web = page.content().upper()
+                
+            elif "CMA" in carrier_upper:
+                url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(8000)
+                texto_web = page.content().upper()
+                
+            elif "HAPAG" in carrier_upper:
+                url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={contenedor}"
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(8000)
+                texto_web = page.content().upper()
+                
+            else:
+                tipo_final = "SCRAPING NO CONFIGURADO PARA ESTA NAVIERA"
+                texto_web = ""
+
+            if texto_web:
+                tipo_final = normalizar_tipo(texto_web)
                 
         except Exception as e:
             tipo_final = f"ERROR: {str(e)[:40]}"
@@ -136,17 +157,18 @@ def consultar():
     naviera_bd, link_tracking = identificar_carrier_y_link(contenedor)
     
     carrier_detectado = override_carrier if (override_carrier and override_carrier.upper() != "BUSCANDO...") else naviera_bd
-    tipo_contenedor = "PENDIENTE"
     
-    if "TRITON" in carrier_detectado.upper():
-        carrier_detectado, tipo_contenedor = scrapear_triton(contenedor)
+    # Procesar scraping unificado
+    if carrier_detectado != "OTRA / LEASING" and carrier_detectado != "DESCONOCIDO":
+        carrier_detectado, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado)
         
-        if carrier_detectado != "Triton International":
+        # Corrección de link si Triton detectó que pertenece a otra naviera
+        if "TRITON" not in carrier_detectado.upper() and override_carrier == "":
             nuevo_link = obtener_link_por_naviera(carrier_detectado)
             if nuevo_link:
                 link_tracking = nuevo_link
     else:
-        tipo_contenedor = "SCRAPING NAVIERA PENDIENTE"
+        tipo_contenedor = "NO SE PUDO DETERMINAR NAVIERA"
     
     resultado = {
         "container": contenedor,
