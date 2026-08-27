@@ -6,10 +6,9 @@ from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-# --- NUEVA RUTA PARA VER LAS CAPTURAS DE PANTALLA ---
 @app.route('/debug/<filename>')
 def debug_image(filename):
-    path = os.path.join(os.getcwd(), filename)
+    path = os.path.join('/tmp', filename)
     if os.path.exists(path):
         return send_file(path, mimetype='image/png')
     return "Imagen no encontrada o ya borrada por el servidor.", 404
@@ -90,24 +89,28 @@ def scrapear_datos(contenedor, carrier_detectado):
             texto_web = ""
             
             if "TRITON" in carrier_upper:
-                url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
+                # Entramos a la página principal de herramientas de Triton
+                url = "https://www.tritoncontainer.com/CustomerTools/UnitInquiry"
                 page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 
-                page.evaluate('''
+                # Inyección JS para rellenar la caja de texto y hacer clic en Search
+                page.evaluate(f'''
+                    let caja = document.querySelector("textarea, input[type='text']");
+                    if (caja) {{
+                        caja.value = "{contenedor}";
+                        caja.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    }}
                     let buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
                     let searchBtn = buttons.find(b => (b.innerText || b.value || "").toLowerCase().includes("search"));
                     if (searchBtn) searchBtn.click();
                 ''')
-                try:
-                    page.locator("input[type='text'], textarea, input").first.press("Enter", timeout=3000)
-                except:
-                    pass
                 
-                page.wait_for_timeout(8000) # Espera simple para no colapsar la RAM
+                page.wait_for_timeout(8000)
                 
-                # TOMA LA FOTO Y GENERA EL LINK DE DEBUG
+                # Guardar captura en /tmp (única ruta con permisos de escritura en Render)
                 filename = f"debug_{contenedor}.png"
-                page.screenshot(path=filename, full_page=True)
+                filepath = os.path.join('/tmp', filename)
+                page.screenshot(path=filepath, full_page=True)
                 debug_link = f"https://bot-contenedores-papw.onrender.com/debug/{filename}"
                 
                 raw_html = page.content()
@@ -115,7 +118,6 @@ def scrapear_datos(contenedor, carrier_detectado):
                     try: raw_html += " " + frame.content()
                     except: pass
                 
-                # Extraer texto de forma ultra ligera usando Python regex en vez del navegador
                 texto_web = re.sub(r'<[^>]+>', ' ', raw_html).upper()
                 texto_web = re.sub(r'\s+', ' ', texto_web)
                 
@@ -138,9 +140,9 @@ def scrapear_datos(contenedor, carrier_detectado):
                 
                 page.wait_for_timeout(8000)
                 
-                # TOMA LA FOTO Y GENERA EL LINK DE DEBUG
                 filename = f"debug_{contenedor}.png"
-                page.screenshot(path=filename, full_page=True)
+                filepath = os.path.join('/tmp', filename)
+                page.screenshot(path=filepath, full_page=True)
                 debug_link = f"https://bot-contenedores-papw.onrender.com/debug/{filename}"
                 
                 raw_html = page.content()
@@ -220,7 +222,6 @@ def consultar():
             if nuevo_link:
                 link_tracking = nuevo_link
                 
-        # Sobrescribimos temporalmente el link con la imagen de debug si existe
         if link_imagen:
             link_tracking = link_imagen
             
