@@ -44,11 +44,11 @@ def identificar_carrier_y_link(contenedor):
 
 def normalizar_tipo(texto):
     texto_upper = texto.upper()
-    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper or "40 DRY STANDARD" in texto_upper:
+    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper or "40 DRY" in texto_upper:
         return "40'DC"
     if "20' DRY VAN" in texto_upper or "20' STANDARD" in texto_upper or "20'DV" in texto_upper or "20 DRY" in texto_upper:
         return "20'DC"
-    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper or "40' DRY HIGH" in texto_upper:
+    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper:
         return "40'HQ"
     if "OPEN TOP" in texto_upper or "40' OT" in texto_upper or "40 OPEN" in texto_upper:
         return "40'OT"
@@ -74,71 +74,82 @@ def scrapear_datos(contenedor, carrier_detectado):
         context = browser.new_context()
         page = context.new_page()
         
-        # Bloqueo estricto de recursos pesados para evitar Error 502 (Out of Memory)
+        # Bloqueo de recursos pesados para evitar desbordes de RAM (OOM) en Render
         page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
         
         try:
             carrier_upper = carrier_detectado.upper()
             texto_web = ""
             
-            leasing_keywords = ["TRITON", "TEXTAINER", "SEACO", "CAI", "LEASING", "OTRA", "FLORENS", "BEACON", "SEACUBE"]
-            is_leasing = any(kw in carrier_upper for kw in leasing_keywords)
-            
-            if is_leasing:
-                url = "https://www.tracecontainer.com/"
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            if "TRITON" in carrier_upper:
+                url = f"https://www.tritoncontainer.com/CustomerTools/UnitInquiry?UnitNumbers={contenedor}"
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 
-                try:
-                    caja = page.locator("input[type='text']").first
-                    caja.fill(contenedor)
-                    page.locator("button", has_text=re.compile(r"track", re.IGNORECASE)).first.click(timeout=3000)
-                except:
-                    pass
-                
-                page.wait_for_timeout(15000)
+                page.evaluate('''
+                    let buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"));
+                    let searchBtn = buttons.find(b => (b.innerText || b.value || "").toLowerCase().includes("search"));
+                    if (searchBtn) searchBtn.click();
+                ''')
+                page.wait_for_timeout(6000)
                 
                 texto_web = page.content().upper()
-                current_url = page.url.upper()
-                
-                if "MAERSK" in current_url or "MAERSK" in texto_web:
-                    carrier_final = "Maersk"
-                elif "MSC" in current_url or "MSC" in texto_web:
-                    carrier_final = "MSC"
-                elif "HAPAG" in current_url or "HAPAG" in texto_web:
-                    carrier_final = "Hapag-Lloyd"
-                elif "CMA" in current_url or "CMA" in texto_web:
-                    carrier_final = "CMA CGM"
-                elif "ONE" in current_url or "ONE-LINE" in current_url:
-                    carrier_final = "ONE"
-                
                 for frame in page.frames:
-                    try:
-                        texto_web += " " + frame.content().upper()
-                    except:
-                        pass
+                    try: texto_web += " " + frame.content().upper()
+                    except: pass
+                
+                if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
+                elif "MAERSK" in texto_web: carrier_final = "Maersk"
+                elif "MSC" in texto_web: carrier_final = "MSC"
+                elif "CMA" in texto_web: carrier_final = "CMA CGM"
+                elif "ONE" in texto_web: carrier_final = "ONE"
 
+            elif "TEXTAINER" in carrier_upper:
+                url = "https://tex.textainer.com/Equipment/StatusAndSpecificationsInquiry"
+                page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                
+                # Inyección JS robusta para lidiar con el formulario ASP.NET de Textainer
+                page.evaluate(f'''
+                    let el = Array.from(document.querySelectorAll("textarea, input[type='text']")).find(e => e.offsetParent !== null);
+                    if(el) el.value = "{contenedor}";
+                    let btn = Array.from(document.querySelectorAll("input[type='submit'], button")).find(e => e.offsetParent !== null);
+                    if(btn) btn.click();
+                ''')
+                
+                page.wait_for_timeout(8000)
+                
+                texto_web = page.content().upper()
+                for frame in page.frames:
+                    try: texto_web += " " + frame.content().upper()
+                    except: pass
+                
+                if "HAPAG" in texto_web: carrier_final = "Hapag-Lloyd"
+                elif "MAERSK" in texto_web: carrier_final = "Maersk"
+                elif "MSC" in texto_web: carrier_final = "MSC"
+                elif "CMA" in texto_web: carrier_final = "CMA CGM"
+                elif "ONE" in texto_web: carrier_final = "ONE"
+                    
             elif "MAERSK" in carrier_upper:
                 url = f"https://www.maersk.com/tracking/{contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(8000)
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                page.wait_for_timeout(5000)
                 texto_web = page.content().upper()
                 
             elif "MSC" in carrier_upper:
                 url = f"https://www.msc.com/en/track-a-shipment?trackingNumber={contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(8000)
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                page.wait_for_timeout(5000)
                 texto_web = page.content().upper()
                 
             elif "CMA" in carrier_upper:
                 url = f"https://www.cma-cgm.com/ebusiness/tracking/search?reference={contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(8000)
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                page.wait_for_timeout(5000)
                 texto_web = page.content().upper()
                 
             elif "HAPAG" in carrier_upper:
                 url = f"https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container={contenedor}"
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(8000)
+                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                page.wait_for_timeout(5000)
                 texto_web = page.content().upper()
                 
             else:
@@ -149,7 +160,11 @@ def scrapear_datos(contenedor, carrier_detectado):
                 tipo_final = normalizar_tipo(texto_web)
                 
         except Exception as e:
-            tipo_final = f"ERROR: {str(e)[:40]}"
+            error_str = str(e).lower()
+            if "timeout" in error_str:
+                tipo_final = "BLOQUEO ANTI-ROBOT O TIEMPO AGOTADO"
+            else:
+                tipo_final = f"ERROR: {str(e)[:40]}"
         finally:
             browser.close()
             
@@ -171,6 +186,7 @@ def consultar():
     if carrier_detectado_original != "DESCONOCIDO":
         carrier_detectado_final, tipo_contenedor = scrapear_datos(contenedor, carrier_detectado_original)
         
+        # Si la empresa de leasing determina que el contenedor está alquilado, se actualiza el link al del cliente final
         if carrier_detectado_original.upper() != carrier_detectado_final.upper() and override_carrier == "":
             nuevo_link = obtener_link_por_naviera(carrier_detectado_final)
             if nuevo_link:
