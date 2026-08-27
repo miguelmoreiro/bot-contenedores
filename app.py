@@ -43,11 +43,11 @@ def identificar_carrier_y_link(contenedor):
 
 def normalizar_tipo(texto):
     texto_upper = texto.upper()
-    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper or "40 DRY" in texto_upper:
+    if "40' DRY VAN" in texto_upper or "40' STANDARD" in texto_upper or "40'DV" in texto_upper or "40 DRY" in texto_upper or "40DC" in texto_upper:
         return "40'DC"
-    if "20' DRY VAN" in texto_upper or "20' STANDARD" in texto_upper or "20'DV" in texto_upper or "20 DRY" in texto_upper:
+    if "20' DRY VAN" in texto_upper or "20' STANDARD" in texto_upper or "20'DV" in texto_upper or "20 DRY" in texto_upper or "20DC" in texto_upper:
         return "20'DC"
-    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper:
+    if "HIGH CUBE" in texto_upper or "40' HC" in texto_upper or "40'HQ" in texto_upper or "40 HIGH" in texto_upper or "40HQ" in texto_upper:
         return "40'HQ"
     if "OPEN TOP" in texto_upper or "40' OT" in texto_upper or "40 OPEN" in texto_upper:
         return "40'OT"
@@ -63,18 +63,14 @@ def consultar_api_triton(contenedor, carrier_detectado):
         session = requests.Session()
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         
-        # 1. Entramos a la página para obtener la sesión y las cookies/tokens iniciales
         home_url = "https://tools.tritoncontainer.com/tritoncontainer/unitStatus/list"
         resp_home = session.get(home_url, headers=headers, timeout=10)
         
         if resp_home.status_code == 200:
             soup = BeautifulSoup(resp_home.text, 'html.parser')
-            
-            # Extraemos el SYNCHRONIZER_TOKEN de la página si existe
             token_input = soup.find("input", {"name": "SYNCHRONIZER_TOKEN"})
             token_val = token_input.get("value", "") if token_input else ""
             
-            # 2. Preparamos el POST a refreshTable con los datos exactos que descubriste
             api_url = "https://tools.tritoncontainer.com/tritoncontainer/unitStatus/refreshTable"
             payload = {
                 "unitNumberText": contenedor,
@@ -85,18 +81,26 @@ def consultar_api_triton(contenedor, carrier_detectado):
             resp_api = session.post(api_url, data=payload, headers=headers, timeout=10)
             
             if resp_api.status_code == 200:
-                data_json = resp_api.json()
-                # La respuesta suele venir en formato JSON con la tabla o los datos internos
-                texto_respuesta = str(data_json).upper()
-                
-                if "MSC" in texto_respuesta or "MED SHIPPING" in texto_respuesta:
-                    carrier_final = "MSC"
-                elif "ONE" in texto_web if 'texto_web' in locals() else False:
-                    carrier_final = "ONE"
-                elif "ONE" in texto_respuesta:
-                    carrier_final = "ONE"
-                    
-                tipo_final = normalizar_tipo(texto_respuesta)
+                try:
+                    data_json = resp_api.json()
+                    # Recorremos la estructura interna de la tabla de datos de Triton (DataTables)
+                    rows = data_json.get("data", [])
+                    if rows and isinstance(rows, list):
+                        for row in rows:
+                            fila_str = str(row).upper()
+                            if contenedor in fila_str:
+                                tipo_final = normalizar_tipo(fila_str)
+                                if "MSC" in fila_str or "MED SHIPPING" in fila_str:
+                                    carrier_final = "MSC"
+                                elif "ONE" in fila_str:
+                                    carrier_final = "ONE"
+                                break
+                    if tipo_final == "SIN DATOS":
+                        texto_respuesta = resp_api.text.upper()
+                        tipo_final = normalizar_tipo(texto_respuesta)
+                except:
+                    texto_respuesta = resp_api.text.upper()
+                    tipo_final = normalizar_tipo(texto_respuesta)
     except Exception as e:
         tipo_final = "ERROR API"
         
